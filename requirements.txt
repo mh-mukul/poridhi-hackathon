@@ -2,6 +2,7 @@ alembic
 cryptography
 fastapi
 passlib
+prometheus_client
 PyJWT
 PyMySQL
 python-dotenv

@@ -1,6 +1,7 @@
 import os
-from fastapi import FastAPI
 from dotenv import load_dotenv
+from fastapi import FastAPI, Response
+from prometheus_client import generate_latest
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 
@@ -46,3 +47,8 @@ app.include_router(qdrant_routes, prefix="/api/v1")
 @app.get("/")
 async def root():
     return {"status": 200, "message": "Server is up and running!", "data": "Made with ❤️"}
+
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type="text/plain")

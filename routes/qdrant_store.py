@@ -1,4 +1,5 @@
 import os
+import time
 from uuid import uuid4
 from fastapi import APIRouter, Request, UploadFile, File, Form, Depends
 
@@ -8,6 +9,7 @@ from utils.helper import ResponseHelper
 from utils.qdrant_store import QdrantStore
 from utils.extract_doc import prepare_documents_from_csv_stream
 from schemas.qdrant_store import CollectionCreatePayload, SearchPayload
+from utils.prometheus_metrics import REQUEST_COUNT, REQUEST_ERRORS, REQUEST_LATENCY
 
 DATA_DIR = "data"
 if not os.path.exists(DATA_DIR):
@@ -24,10 +26,14 @@ def collection_create(
     data: CollectionCreatePayload,
     _: None = Depends(get_api_key),
 ):
+    REQUEST_COUNT.inc()
+    start_time = time.time()
     try:
         qdrant.create_collection(collection_name=data.collection_name)
         return response.success_response(201, "Collection created.")
     except Exception as e:
+        REQUEST_ERRORS.inc()
+        REQUEST_LATENCY.observe(time.time() - start_time)
         logger.error(f"Failed to create collection: {e}")
         return response.error_response(500, "Failed to create collection.", str(e))
 
@@ -45,7 +51,11 @@ def document_add(
         100, description="Number of documents to yield per batch"),
     _: None = Depends(get_api_key),
 ):
+    REQUEST_COUNT.inc()
+    start_time = time.time()
     if file.content_type not in ["text/csv"]:
+        REQUEST_ERRORS.inc()
+        REQUEST_LATENCY.observe(time.time() - start_time)
         return response.error_response(400, "Invalid file type. Only CSV files are allowed.")
 
     vector_columns = [col.strip() for col in vector_columns.split(",")]
@@ -65,10 +75,13 @@ def document_add(
             )
         # Clean up the file after processing
         os.remove(file_path)
+        REQUEST_LATENCY.observe(time.time() - start_time)
         return response.success_response(200, "Documents added successfully.")
     except Exception as e:
         os.remove(file_path)
         logger.error(f"Failed to add documents: {e}")
+        REQUEST_ERRORS.inc()
+        REQUEST_LATENCY.observe(time.time() - start_time)
         return response.error_response(500, "Failed to add documents.", str(e))
 
 
@@ -78,8 +91,12 @@ def document_search(
     payload: SearchPayload,
     _: None = Depends(get_api_key),
 ):
+    REQUEST_COUNT.inc()
+    start_time = time.time()
     query = payload.query.strip()
     if not query:
+        REQUEST_ERRORS.inc()
+        REQUEST_LATENCY.observe(time.time() - start_time)
         return response.error_response(400, "Query cannot be empty.")
 
     try:
@@ -95,7 +112,10 @@ def document_search(
             }
             for hit in results.points
         ]
+        REQUEST_LATENCY.observe(time.time() - start_time)
         return response.success_response(200, "Success", results)
     except Exception as e:
+        REQUEST_ERRORS.inc()
+        REQUEST_LATENCY.observe(time.time() - start_time)
         logger.error(f"Failed to search documents: {e}")
         return response.error_response(500, "Failed to search documents.", str(e))
