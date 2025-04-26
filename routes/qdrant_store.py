@@ -1,5 +1,6 @@
 import os
 import time
+import json
 from uuid import uuid4
 from fastapi import APIRouter, Request, UploadFile, File, Form, Depends
 
@@ -7,6 +8,7 @@ from configs.logger import logger
 from utils.auth import get_api_key
 from utils.helper import ResponseHelper
 from utils.qdrant_store import QdrantStore
+from utils.redis_cache import redis_client, get_query_cache_key
 from utils.extract_doc import prepare_documents_from_csv_stream
 from schemas.qdrant_store import CollectionCreatePayload, SearchPayload
 from utils.prometheus_metrics import REQUEST_COUNT, REQUEST_ERRORS, REQUEST_LATENCY
@@ -94,16 +96,31 @@ def document_search(
     REQUEST_COUNT.inc()
     start_time = time.time()
     query = payload.query.strip()
+
     if not query:
         REQUEST_ERRORS.inc()
         REQUEST_LATENCY.observe(time.time() - start_time)
         return response.error_response(400, "Query cannot be empty.")
 
     try:
+        # === Step 1: Try fetching from Redis Cache ===
+        cache_key = get_query_cache_key(
+            payload.collection_name, query, payload.limit)
+        cached_result = redis_client.get(cache_key)
+
+        if cached_result:
+            # Cache hit
+            REQUEST_LATENCY.observe(time.time() - start_time)
+            results = json.loads(cached_result)
+            return response.success_response(200, "Success (from cache)", results)
+
+        # === Step 2: Perform normal search ===
         results = qdrant.search_documents(
-            payload.collection_name, query, limit=payload.limit)
+            payload.collection_name, query, limit=payload.limit
+        )
         if not results:
             return response.error_response(404, "No results found.")
+
         results = [
             {
                 "id": hit.id,
@@ -112,8 +129,14 @@ def document_search(
             }
             for hit in results.points
         ]
+
+        # === Step 3: Cache the result in Redis ===
+        redis_client.set(cache_key, json.dumps(
+            results), ex=86400)  # 1 hour expiry
+
         REQUEST_LATENCY.observe(time.time() - start_time)
         return response.success_response(200, "Success", results)
+
     except Exception as e:
         REQUEST_ERRORS.inc()
         REQUEST_LATENCY.observe(time.time() - start_time)
