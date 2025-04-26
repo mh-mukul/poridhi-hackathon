@@ -5,6 +5,7 @@ passlib
 PyJWT
 PyMySQL
 python-dotenv
+python-multipart
 qdrant-client
 requests
 sentence-transformers
