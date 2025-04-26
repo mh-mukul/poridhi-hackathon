@@ -1,31 +1,44 @@
 import os
-from dotenv import load_dotenv
 from pydantic_ai import Agent
-from pydantic_ai.models.gemini import GeminiModel
-from pydantic_ai.providers.google_gla import GoogleGLAProvider
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from configs.logger import logger
 
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
+OLLAMA_URL = os.getenv("OLLAMA_URL")
 
 
 class ResponseModel(BaseModel):
-    product: str = Field(...,
-                         description="The main item or object the user is referring to.")
-    intent: str = Field(
-        None, description="The qualifier, description, or attribute that shows what kind, type, or preference the user has about the product (e.g., size, color, brand, or quantity).")
+    sorted_index: list = Field(
+        ..., description="The list of products index sorted in ascending order by users preference",)
 
 
-model = GeminiModel(
-    'gemini-2.0-flash-exp', provider=GoogleGLAProvider(api_key=GEMINI_API_KEY)
+ollama_model = OpenAIModel(
+    model_name=OLLAMA_MODEL, provider=OpenAIProvider(
+        base_url=OLLAMA_URL, api_key="apikey")
 )
-agent = Agent(model, output_type=ResponseModel)
-agent.system_prompt = """You are an intelligent text processing agent. Your task is to extract information according to the given schema"""
 
-query = input("Search: ")
+agent = Agent(ollama_model, output_type=ResponseModel)
 
-result = agent.run_sync(query, model_settings={
-    "temperature": 0.2,
-})
 
-print(result.output)
+def run_agent(query: str, products: list):
+
+    agent.system_prompt = f"""You are a helpful assistant. You will be given a list of products and a user prefered item. Your task is to sort the list of products based on the user's preference. And return the sorted list of products index in ascending order. Here is the list of products: {products}."""
+
+    user_prompt = f"""The user prefered item is {query}. Please return the sorted list of products index in ascending order. Do not include any other text in your response."""
+    try:
+        result = agent.run_sync(user_prompt, model_settings={
+            "temperature": 0.2,
+        })
+        logger.info(f"Agent result: {result}")
+        if result.output is None:
+            logger.error("No output from the agent.")
+            return None
+        return result.output
+    except Exception as e:
+        logger.error(f"Error extracting intend: {e}")
+        return None

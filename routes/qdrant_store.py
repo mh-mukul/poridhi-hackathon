@@ -5,7 +5,9 @@ from uuid import uuid4
 from fastapi import APIRouter, Request, UploadFile, File, Form, Depends
 
 from configs.logger import logger
+from utils.agent import run_agent
 from utils.auth import get_api_key
+from utils.helper import sort_by_index
 from utils.helper import ResponseHelper
 from utils.qdrant_store import QdrantStore
 from utils.redis_cache import redis_client, get_query_cache_key
@@ -130,7 +132,15 @@ def document_search(
             for hit in results.points
         ]
 
-        # === Step 3: Cache the result in Redis ===
+        # === Step 3: Run the agent to sort the results ===
+        # agent_result = run_agent(query, results)
+        # if agent_result:
+        #     sorted_index = agent_result.sorted_index
+        #     results = sort_by_index(results, sorted_index)
+        # else:
+        #     logger.error("Agent returned no result.")
+
+        # === Step 4: Cache the result in Redis ===
         redis_client.set(cache_key, json.dumps(
             results), ex=86400)  # 1 hour expiry
 
